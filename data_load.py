@@ -48,6 +48,21 @@ class FacialKeypointsDataset(Dataset):
 
     
 # tranforms
+import torch
+from torchvision import transforms, utils
+# tranforms
+
+
+class GrayScale(object):
+    
+    def __call__(self, sample):
+        
+        image, keypoints = sample["image"], sample["keypoints"]
+        
+        image_copy = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY).reshape(image.shape[0], image.shape[1], 1)
+        
+        print(image_copy.shape)
+        return {"image": image_copy, "keypoints": keypoints}
 
 class Normalize(object):
     """Convert a color image to grayscale and normalize the color range to [0,1]."""        
@@ -59,11 +74,10 @@ class Normalize(object):
         key_pts_copy = np.copy(key_pts)
 
         # convert image to grayscale
-        image_copy = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        #image_copy = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         
         # scale color range from [0, 255] to [0, 1]
         image_copy=  image_copy/255.0
-            
         
         # scale keypoints to be centered around 0 with a range of [-1, 1]
         # mean = 100, sqrt = 50, so, pts should be (pts - 100)/50
@@ -90,6 +104,7 @@ class Rescale(object):
         image, key_pts = sample['image'], sample['keypoints']
 
         h, w = image.shape[:2]
+        #keep the  aspec ratio
         if isinstance(self.output_size, int):
             if h > w:
                 new_h, new_w = self.output_size * h / w, self.output_size
@@ -159,3 +174,79 @@ class ToTensor(object):
         
         return {'image': torch.from_numpy(image),
                 'keypoints': torch.from_numpy(key_pts)}
+class RandomRotation(object):
+    """Rotate randomly an image in a sample
+    Args:
+        min_rotation_angle (int)
+        max_rotation_angle (int)
+    """
+    
+    def __init__(self, range_angle=45, range_scale=0.1):
+        
+        self.range_angle = range_angle
+        self.range_scale = range_scale
+        
+    def __call__(self, sample):
+        
+        image, keypoints = sample['image'], sample['keypoints']
+        
+        random_angle = -self.range_angle + np.random.random()*2*self.range_angle
+        random_scale = 1-self.range_scale + np.random.random()*2*self.range_scale
+
+        (h, w) = image.shape[:2]
+        (cX, cY) = (w // 2, h // 2)
+
+        rotation = cv2.getRotationMatrix2D((cX, cY), random_angle, random_scale)
+
+        keypoints_copy = np.hstack([keypoints, np.ones((keypoints.shape[0], 1))])
+        #print("keypoints_shape : ", keypoints_copy.T)
+        keypoints_copy = np.matmul(rotation, keypoints_copy.T).T
+
+
+        rotated_image = cv2.warpAffine(image, rotation,(h, w))
+        print("rotated_image_shape : ", rotated_image.shape)
+        
+        return {'image': rotated_image,
+                'keypoints': keypoints_copy}
+class RandomHorizontalFlip(object):
+    """Rotate randomly an image in a sample
+    Args:
+
+    """ 
+    def __init__(self):
+        
+        self.flip_indices =  [(21, 22), (20, 23), (19, 24), (18, 25), (17, 26), #eye brow
+                        (36, 45), (37, 44), (38, 43), (39, 42), (41, 46), (40, 47), # eyes
+                        (0, 16), (1, 15), (2, 14), (3, 13), (4, 12), (5, 11), (6, 10), (7, 9), #chin
+                        (48, 54), (49, 54), (50, 53), (58, 56), (59, 55), (60, 64), (61, 64), (67, 65), #mouth
+                        (31, 35), (32, 34) # nose
+                       ]
+
+    def __call__(self, sample):
+        
+        flip = np.random.random() > 0.5
+        
+        image, keypoints = sample['image'], sample['keypoints']
+        
+        keypoints_copy = keypoints[:,:]
+        
+        (h, w) = image.shape[:2]
+        
+        if flip:
+            # change the coordinates of the keypoints
+            keypoints_copy[:,0] = w - keypoints_copy[:,0]
+            #and inverse their position in keypoints as well
+            for i, j in self.flip_indices:
+                temp = [keypoints_copy[i,0],keypoints_copy[i,1]]
+
+                keypoints_copy[i,0] = keypoints_copy[j,0]
+                keypoints_copy[i,1] = keypoints_copy[j,1]
+                
+                keypoints_copy[j,0] = temp[0]
+                keypoints_copy[j,1] = temp[1]
+            #flip the image
+            image = image[:,-1:0:-1,:]
+            
+        
+        return {'image': image,
+                'keypoints': keypoints_copy}
